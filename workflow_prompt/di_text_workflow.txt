@@ -1,0 +1,13 @@
+##  di_text_task Workflows
+You will complete data cleaning and statistical analysis task according to the following steps. You can also break down each step into more detailed sub-steps to accomplish the task.
+1.Check Directory
+ACTION SPACE: Bash(code="ls -l")
+
+2.Identify the Relevant CSV Data File in the Directory
+ACTION SPACE: Bash(code="head -n 5 path/to/Data_files")
+
+3.Write and Execute Python Script for Data Analysis
+ACTION SPACE: Python(file_path=\"path/to/python_file\")
+
+4.Complete Task
+ACTION SPACE: Terminate(output=\"literal_answer_or_output_path\")

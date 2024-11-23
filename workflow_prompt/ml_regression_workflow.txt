@@ -1,0 +1,7 @@
+##  ml_regression_task Workflows
+You will complete the Regression Prediction Task according to the following steps. You can also break down each step into more detailed sub-steps to accomplish the task.
+1.Check Directory -> ACTION SPACE：Bash(code=\"ls -l\")
+2.Please Check Each Relevant Data File in the directory -> ACTION SPACE：Bash(code=\"head -n 5 path/to/Data_files\")
+3.Write and Execute Python Script,and Ensure that the format of the output file matches the format of the sample file-> ACTION SPACE：Python(file_path=\"path/to/python_file\")
+4.Check Results -> ACTION SPACE：Bash(code=\"cat literal_answer_or_output_path\")
+5.Complete Task -> ACTION SPACE：Terminate(output=\"literal_answer_or_output_path\")

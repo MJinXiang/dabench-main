@@ -1,0 +1,6 @@
+##  ml_binary_task Workflows
+You will complete the Classification Prediction Tasks according to the following steps. You can also break down each step into more detailed sub-steps to accomplish the task.
+1.Please Check Each Relevant Data File in the directory -> ACTION SPACE：ListFiles(directory="path/to/directory")
+2.Based on the above a priori knowledge, please Write and Execute Python Script,and Ensure that the format of the output file matches the format of the sample file-> ACTION SPACE：Python(file_path=\"path/to/python_file\")
+3.Check Results -> ACTION SPACE：CheckOutputWithLLM(output="output files or content", target="target file or task description")
+4.Complete Task -> ACTION SPACE：Terminate(output=\"literal_answer_or_output_path\")
