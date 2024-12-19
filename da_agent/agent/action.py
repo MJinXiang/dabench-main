@@ -68,7 +68,9 @@ class Bash(Action):
 
     @classmethod
     def get_this_action(cls) -> str:
-        return """Action: Bash(code=\"head -n 5 path/to/Data_files\")"""
+        return """If you need to read the contents of a file, you can use the following Action: Bash(code=\"head -n 5 path/to/Data_files\")
+        If you need to list the contents of a directory, you can use the following Action: Bash(code=\"ls -l\")
+        """
 
     @classmethod
     def parse_action_from_text(cls, text: str) -> Optional[Action]:
@@ -388,6 +390,77 @@ class CheckOutputWithLLM(Action):
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(output="{self.output}", target="{self.target}")'
 
+
+@dataclass
+class AddNewToolAction(Action):
+    action_type: str = field(
+        default="add_new_tool",
+        init=False,
+        repr=False,
+        metadata={"help": "Action to add a new tool"}
+    )
+
+    code: str = field(
+        metadata={"help": "Python code of the new tool"}
+    )
+
+    @classmethod
+    def get_action_description(cls) -> str:
+        return """
+### AddNewToolAction
+Signature: `AddNewToolAction(code="def new_tool(...): ...")`
+Description: Adds and executes a new tool defined by the provided Python code.
+Example: AddNewToolAction(code="def new_tool(input): return input * 2")
+"""
+
+    @classmethod
+    def get_this_action(cls) -> str:
+        return """Action: AddNewToolAction(code="def new_tool(input): return input * 2")"""
+
+    @classmethod
+    def parse_action_from_text(cls, text: str) -> Optional[Action]:
+        import re
+        match = re.match(r'AddNewToolAction\(\s*code\s*=\s*(\".*?\"|\'.*?\')\s*\)', text.strip(), re.DOTALL)
+        if match:
+            code = remove_quote(match.group(1))
+            return cls(code=code)
+        return None
+
+
+@dataclass
+class QueryToolsAction(Action):
+    action_type: str = field(
+        default="query_tools",
+        init=False,
+        repr=False,
+        metadata={"help": "Action to query tools"}
+    )
+
+    query: str = field(
+        metadata={"help": "Query to retrieve relevant tools"}
+    )
+
+    @classmethod
+    def get_action_description(cls) -> str:
+        return """
+### QueryToolsAction
+Signature: `QueryToolsAction(query="your query here")`
+Description: Retrieves relevant tools based on the provided query.
+Example: QueryToolsAction(query="data analysis tools")
+"""
+
+    @classmethod
+    def get_this_action(cls) -> str:
+        return """Action: QueryToolsAction(query="data analysis tools")"""
+
+
+    @classmethod
+    def parse_action_from_text(cls, text: str) -> Optional[Action]:
+        match = re.match(r'QueryToolsAction\(\s*query\s*=\s*(.+?)\)', text.strip())
+        if match:
+            query = remove_quote(match.group(1))
+            return cls(query=query)
+        return None
 
 # @dataclass
 # class ExecutePythonSnippet(Action):

@@ -28,7 +28,7 @@ class PlotPy:
         exclude_keywords = ['plt.close', 'matplotlib.pyplot.close', 'plt.show',
                 'matplotlib.pyplot.show', 'plt.savefig', 'matplotlib.pyplot.savefig']
         py_content = [line for line in py_content if not any(keyword in line for keyword in exclude_keywords)]
-        main_keywords = ['if __name__ == "__main__', "if __name__ == '__main__'"]
+        main_keywords = ['if __name__ == "__main__"', "if __name__ == '__main__'"]
         find_main = next((line for line in py_content if any(keyword in line for keyword in main_keywords)), None)
         if find_main is not None:
             py_content = py_content[:find_main] + \

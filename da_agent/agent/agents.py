@@ -1,27 +1,32 @@
 import base64
 import json
 import logging
+import ast
 import os
+from glob import glob
 import re
 import time
 import uuid
 from http import HTTPStatus
 from io import BytesIO
 from typing import Dict, List
-from da_agent.agent.prompts import SYS_PROMPT_IN_OUR_CODE
-from da_agent.agent.action import Bash, Action, Terminate, Python, SQL, ListFiles, LLMQuery, CheckOutputWithLLM
+from da_agent.agent.prompts import SYS_PROMPT_IN_OUR_CODE, SYS_PROMPT_PLOT_BAR
+from da_agent.agent.COT_prompts import ELABORATE_DEEP_THINK_PROMPT_CODING
+from da_agent.agent.action import Bash, Action, Terminate, Python, SQL, ListFiles, LLMQuery, CheckOutputWithLLM,AddNewToolAction, QueryToolsAction
 from da_agent.envs.da_agent import DA_Agent_Env
 from openai import AzureOpenAI
 from typing import Dict, List, Optional, Tuple, Any, TypedDict
+from transformers.agents.agents import Toolbox
 # agents.py
 # from da_agent.agent.workflow import WorkflowNode, workflow_start_node
 from da_agent.agent.models import call_llm
+from da_agent.agent.workflow import AVAILABLE_ACTION_CLASSES
+from da_agent.agent.generatedtool import GeneratedTool, add_parent_pointers, parse_generated_tools
+from da_agent.agent.tool_retriever import ToolRetrievalTool
 
-from agent.models import call_llm
 
 MAX_OBSERVATION_LENGTH = 2000
 TIME_OUT_ACTION = 600
-
 
 logger = logging.getLogger("da_agent")
 
@@ -35,6 +40,11 @@ class PromptAgent:
         temperature=0.5,
         max_memory_length=10,
         max_steps=15,
+        #新增
+        generated_tool_dir="",
+        disable_accum=False,
+        *args,
+        **kwargs,
     ):
         
         self.model = model
@@ -43,6 +53,19 @@ class PromptAgent:
         self.temperature = temperature
         self.max_memory_length = max_memory_length
         self.max_steps = max_steps
+
+        # 动态动作生成相关的初始化
+        self.generated_tool_dir = generated_tool_dir
+        self.disable_accum = disable_accum
+        # 加载生成的工具
+        self.generated_toolbox = self.load_generated_tools()
+        # 用于追踪函数调用次数（可选）
+        self.prev_num_calls = {}
+        # 初始化 ToolRetrievalTool
+        self.tool_retrieval_tool = ToolRetrievalTool(self.generated_tool_dir)
+        # 将 ToolRetrievalTool 添加到工具箱
+        self.generated_toolbox.add_tool(self.tool_retrieval_tool)
+        
         
         self.thoughts = []
         self.responses = []
@@ -52,8 +75,8 @@ class PromptAgent:
         self.history_messages = []
         self.env = None
         self.codes = []
-        self._AVAILABLE_ACTION_CLASSES = [Bash, Python, SQL, Terminate, ListFiles, LLMQuery, CheckOutputWithLLM]
-        # self._AVAILABLE_ACTION_CLASSES = [Bash, Terminate]
+        # self._AVAILABLE_ACTION_CLASSES = [Bash, Python, SQL, Terminate, ListFiles, LLMQuery, CheckOutputWithLLM]
+        self._AVAILABLE_ACTION_CLASSES = AVAILABLE_ACTION_CLASSES
         self.work_dir = "/workspace"
         
     def set_env_and_task(self, env: DA_Agent_Env):
@@ -70,7 +93,7 @@ class PromptAgent:
         self.workflow_start_node = self.env.workflow_start_node
         action_space = "".join([action_cls.get_action_description() for action_cls in self._AVAILABLE_ACTION_CLASSES])
         # self.system_message = SYS_PROMPT_IN_OUR_CODE.format(work_dir=self.work_dir, action_space=action_space, task=self.instruction, max_steps=self.max_steps,workflow=self.workflow)
-        self.system_message = SYS_PROMPT_IN_OUR_CODE.format(work_dir=self.work_dir, action_space=action_space, task=self.instruction, max_steps=self.max_steps)
+        self.system_message = SYS_PROMPT_PLOT_BAR.format(work_dir=self.work_dir, action_space=action_space, task=self.instruction, max_steps=self.max_steps)
         self.history_messages.append({
             "role": "system",
             "content": [
@@ -93,6 +116,7 @@ class PromptAgent:
         while not status:
             #将一个新的用户消息添加到消息历史记录中
             messages = self.history_messages.copy()
+
             messages.append({
                 "role": "user",
                 "content": [
@@ -102,6 +126,7 @@ class PromptAgent:
                     }
                 ]
             })  
+
             status, response = call_llm({
                 "model": self.model,
                 "messages": messages,
@@ -117,10 +142,10 @@ class PromptAgent:
                 else:
                     raise Exception(f"Failed to call LLM, response: {response}")
             
-
         try:
             #提取action
             action = self.parse_action(response)
+
             #提取thought
             thought = re.search(r'Thought:(.*?)Action', response, flags=re.DOTALL)
             if thought:
@@ -139,14 +164,20 @@ class PromptAgent:
         self.thoughts.append(thought)
         self.responses.append(response)
         self.actions.append(action)
+
         if action is not None:
+             # 保存新生成的工具（如果有）
+            if isinstance(action, AddNewToolAction) and not self.disable_accum:
+                self.save_generated_tools(action.code)
+
             self.codes.append(action.code)
         else:
             self.codes.append(None)
-
+       
         return response, action
     
-    
+
+
     def _add_message(self, observations: str, thought: str, action: Action):
         self.history_messages.append({
             "role": "user",
@@ -201,7 +232,88 @@ class PromptAgent:
         
         return output_action
     
+
+     #检查函数名是否冲突
+    def check_collision(self, code_action: str):
+        # Make sure code_action has no syntax errors first
+        try:
+            tree = ast.parse(code_action)
+        except:
+            return
+
+        add_parent_pointers(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and isinstance(node.parent, ast.Module):
+                name = node.name
+                if name in self.generated_toolbox.tools:
+                    if name not in self.metrics["collision"]:
+                        self.metrics["collision"][name] = 1
+                    else:
+                        self.metrics["collision"][name] += 1
+                    # error_msg = f"Function name '{name}' already exists. Please choose a different name."
+                    # raise AgentExecutionError(error_msg)
+
+    def add_decorators(self, code_action: str) -> str:
+        # TODO: Need to add decorator to generated functions that were loaded from disk as well
+        try:
+            tree = ast.parse(code_action)
+            add_parent_pointers(tree)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and isinstance(node.parent, ast.Module):
+                    decorator = ast.Name(id="track_num_calls", ctx=ast.Load())
+                    node.decorator_list.append(decorator)
+            updated_code_action = ast.unparse(tree)
+            return updated_code_action
+        except:
+            print("Add decorator failed :( returning original code_action")
+            return code_action
+
+    def load_generated_tools(self):
+        generated_tools: list[GeneratedTool] = []
+        generated_tool_paths = sorted(glob(os.path.join(self.generated_tool_dir, "*.py")))
+        for path in generated_tool_paths:
+            with open(path, "r") as f:
+                code = f.read()
+            tools = parse_generated_tools(code)
+            generated_tools.extend(tools)
+            # 将生成的工具加载到环境中
+            self.env.step(code)
+        return Toolbox(generated_tools)
+   
+
+    def remove_shell_commands(self, code_action: str) -> str:
+        shell_cmds = []
+        no_cmds_code_action = []
+        for line in code_action.split("\n"):
+            if line.startswith("!"):
+                shell_cmds.append(line)
+            else:
+                no_cmds_code_action.append(line)
+
+        shell_cmds = "\n".join(shell_cmds)
+        code_action = "\n".join(no_cmds_code_action)
+        return shell_cmds, code_action
     
+    def save_generated_tools(self, code_action: str):
+        _, code_action = self.remove_shell_commands(code_action)
+        generated_tools = parse_generated_tools(code_action)
+
+        for tool in generated_tools:
+            self.generated_toolbox.add_tool(tool)
+
+            tool_id = len(self.generated_toolbox.tools)
+            file_name = f"{str(tool_id).zfill(4)}_{tool.name}.py"
+            file_path = os.path.join(self.generated_tool_dir, file_name)
+
+            content = tool.code
+            if tool.dependencies:
+                content = f"{tool.dependencies}\n\n\n{content}"
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+ 
+
     def run(self):
         assert self.env is not None, "Environment is not set."
         result = ""
@@ -223,16 +335,6 @@ class PromptAgent:
             else:
                 # 如果没有当前节点，工作流可能已经结束
                 obs_with_workflow = obs
-
-
-            # # 如果有工作流，在提示中加入当前的工作流步骤信息
-            # if self.workflow and workflow_step < len(self.workflow):
-            #     current_workflow_action = self.workflow[workflow_step]
-            #     # 提供给 LLM 的提示包含当前的工作流步骤说明
-            #     obs_with_workflow = f"{obs}\n\nYou can proceed with the following steps with this Action:\n{current_workflow_action.get_this_action()}"
-            # else:
-            #     # 如果没有工作流或工作流结束，使用原始观察
-            #     obs_with_workflow = obs
 
             _, action = self.predict(
                 # obs

@@ -106,42 +106,6 @@ class PythonController:
         return result.strip() == 'exists'
     
     def execute_python_file(self, file_path: str, content: str):
-        # from da_agent.agent.models import call_llm
-
-        # content = content.replace('"', '\\"').replace('`', '\\`').replace('$', '\\$')
-        
-        # # 评估代码
-        # prompt = f"""
-        # Please evaluate the following Python code for any potential issues or improvements. If there are any issues, please provide the corrected code:
-        # ```python
-        # {content}
-        # """
-
-        # payload = {
-        #     "model": "gpt-4o",
-        #     "messages": [
-        #         {"role": "user", "content": prompt}
-        #     ],
-        #     "max_tokens": 500,
-        #     "temperature": 0
-        # }
-
-        # try:
-        #     success, evaluation = call_llm(payload)
-        #     if success:
-        #         print(f"Code evaluation: {evaluation}")
-        #         # 提取改进后的代码
-        #         improved_code_match = re.search(r'```python(.*?)```', evaluation, re.DOTALL)
-        #         if improved_code_match:
-        #             improved_code = improved_code_match.group(1).strip()
-        #             if improved_code:
-        #                 content = improved_code
-        #     else:
-        #         print(f"Code evaluation failed: {evaluation}")
-        #         return {"error": evaluation}
-        # except Exception as e:
-        #     print(f"Error querying LLM: {e}")
-        #     return {"error": str(e)}
 
         escaped_content = content.replace('"', '\\"').replace('`', '\\`').replace('$', '\\$')
         
@@ -225,53 +189,129 @@ class PythonController:
     #     return formatted_result
     
 
+    # def list_files(self, dir_path: str):
+    #     """
+    #     列出目录及其子目录中的所有文件，并获取每个文件的前3行内容。
+    #     返回一个格式化的字符串，而不是字典。
+    #     """
+    #     if not dir_path.startswith('/'):
+    #         if platform.system() == 'Windows':
+    #             dir_path = os.path.join(self.mnt_dir, dir_path.replace("/", "\\"))
+    #         else:
+    #             dir_path = os.path.join(self.mnt_dir, dir_path)
+    
+    #     dir_path = os.path.normpath(dir_path)
+    #     print(f"Listing files in directory: {dir_path}")  # 添加调试信息
+    
+    #     result = []
+    #     for root, dirs, files in os.walk(dir_path):
+    #         for filename in files:
+    #             filepath = os.path.join(root, filename)
+    #             print(f"Processing file: {filepath}")  # 添加调试信息
+            
+    #             if filename.lower() == 'readme.md':
+    #                 print(f"Skipping file: {filepath}")  # 添加调试信息
+    #                 continue
+                
+    #             if os.path.isfile(filepath):
+    #                 try:
+    #                     with open(filepath, 'r', encoding='utf-8') as file:
+    #                         lines = []
+    #                         for _ in range(3):  # 读取前3行
+    #                             line = file.readline()
+    #                             if not line:
+    #                                 break
+    #                             lines.append(line.strip())
+    #                     # 添加文件内容到结果
+    #                     file_content = "\n".join(lines)
+    #                     result.append(f"\nFilename: {filename}\n{file_content}\n")
+    #                 except Exception as e:
+    #                     print(f"Error reading file {filepath}: {e}")  # 添加调试信息
+    #                     result.append(f"\nFilename: {filepath}\nError: {e}\n")
+    #             else:
+    #                 print(f"Not a file: {filepath}")  # 添加调试信息
+    #                 result.append(f"\nFilename: {filepath}\nStatus: Not a regular file.\n")
+    
+    #     # 将结果列表转换为单一的字符串
+    #     formatted_result = "".join(result)
+    #     return formatted_result
+    
     def list_files(self, dir_path: str):
         """
-        列出目录及其子目录中的所有文件，并获取每个文件的前3行内容。
-        返回一个格式化的字符串，而不是字典。
+        列出目录及其子目录中的所有文件。对于数据文件（如 .csv, .json, .txt 等），只读取前3行内容；
+        对于其他格式的文件，读取全部内容。不读取名为 'readme.md' 的文件。
+        返回一个格式化的字符串。
         """
+        # 定义数据文件的扩展名
+        data_file_extensions = {'.csv'}
+        MAX_LINE_LENGTH = 800  # 第一行最大字符数
+
         if not dir_path.startswith('/'):
             if platform.system() == 'Windows':
                 dir_path = os.path.join(self.mnt_dir, dir_path.replace("/", "\\"))
             else:
                 dir_path = os.path.join(self.mnt_dir, dir_path)
-    
+
         dir_path = os.path.normpath(dir_path)
         print(f"Listing files in directory: {dir_path}")  # 添加调试信息
-    
+
         result = []
         for root, dirs, files in os.walk(dir_path):
             for filename in files:
                 filepath = os.path.join(root, filename)
                 print(f"Processing file: {filepath}")  # 添加调试信息
-            
+
                 if filename.lower() == 'readme.md':
                     print(f"Skipping file: {filepath}")  # 添加调试信息
                     continue
-                
+
                 if os.path.isfile(filepath):
                     try:
+                        _, ext = os.path.splitext(filename)
+                        ext = ext.lower()
+                        lines = []
+                    
                         with open(filepath, 'r', encoding='utf-8') as file:
-                            lines = []
-                            for _ in range(3):  # 读取前3行
-                                line = file.readline()
-                                if not line:
-                                    break
-                                lines.append(line.strip())
-                        # 添加文件内容到结果
-                        file_content = "\n".join(lines)
-                        result.append(f"\nFilename: {filename}\n{file_content}\n")
+                            if ext in data_file_extensions:
+                                # 读取并检查标题行长度
+                                header = file.readline()
+                                if len(header.strip()) > MAX_LINE_LENGTH:
+                                    result.append(f"\nFilename: {filename}\nDon't read this file due to long header line. Next, you can use a Python script to check if the file contains the desired content without outputting the entire file.\n")
+                                    # print(f"Skipping file due to long header line: {filename}")  # 添加调试信息
+                                    continue
+
+                                # second_line = file.readline()
+                                # if second_line:
+                                #     second_line = second_line.strip()
+                                #     if re.match(r'^[A-Za-z0-9\s,]+$', second_line):
+                                #         print(f"Skipping file due to English second line: {filename}")  # 添加调试信息
+                                #         continue
+                                
+                                # 读取前3行
+                                file.seek(0)
+                                for _ in range(3):
+                                    line = file.readline()
+                                    if not line:
+                                        break
+                                    lines.append(line.strip())
+                                file_content = "\n".join(lines)
+                                result.append(f"\nFilename: {filename}\n{file_content}\n")
+                            else:
+                                # 读取全部内容
+                                file_content = file.read().strip()
+                                result.append(f"\nFilename: {filename}\n{file_content}\n")
                     except Exception as e:
                         print(f"Error reading file {filepath}: {e}")  # 添加调试信息
                         result.append(f"\nFilename: {filepath}\nError: {e}\n")
                 else:
                     print(f"Not a file: {filepath}")  # 添加调试信息
                     result.append(f"\nFilename: {filepath}\nStatus: Not a regular file.\n")
-    
+
         # 将结果列表转换为单一的字符串
         formatted_result = "".join(result)
         return formatted_result
-    
+
+
     def execute_llm_search(self, prompt: str):
         """ Execute the action to query another LLM """
         from da_agent.agent.models import call_llm

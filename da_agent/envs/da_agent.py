@@ -15,9 +15,12 @@ from da_agent.controllers.python import PythonController
 from da_agent.controllers.setup import SetupController
 from da_agent.envs.utils import *
 from da_agent import configs
-from da_agent.agent.action import Bash, Action, Terminate, Python, SQL, ListFiles, LLMQuery, CheckOutputWithLLM
+from da_agent.agent.action import Bash, Action, Terminate, Python, SQL, ListFiles, LLMQuery, CheckOutputWithLLM, AddNewToolAction, QueryToolsAction
 import signal
 from da_agent.agent.workflow import WorkflowNode, workflow_start_node
+from da_agent.agent.tool_retriever import ToolRetriever
+from da_agent.agent.tool_retriever import ToolRetrievalTool
+from da_agent.agent.generatedtool import parse_generated_tools
 
 logger = logging.getLogger("da_agent.env")
 
@@ -28,7 +31,7 @@ Getter = Callable[[gym.Env, Dict[str, Any]], Any]
 # constants
 START_UP_DELAY = 2 # start up delay for docker container
 DEFAULT_TIME_OUT = 60 # default waiting time for each action
-MAX_OBS_LENGTH = 3000
+MAX_OBS_LENGTH = 6000
 EMPTY_DATA_PATH = 'da_agent/data/empty' # an empty data directory
 DEFAULT_IMAGE_DIR = 'da_agent/images' # default directory to store docker images
 DEFAULT_WORK_DIR = '/workspace' # default working directory in the container
@@ -43,7 +46,7 @@ class DA_Agent_Env(gym.Env):
     Fixme: refactor the logic when implementing the multi-process version
     """
     # def __init__(self, env_config, task_config, source_dir, workflow, cache_dir, mnt_dir):
-    def __init__(self, env_config, task_config, source_dir,cache_dir, mnt_dir):
+    def __init__(self, env_config, task_config, source_dir,cache_dir, mnt_dir, generated_tool_dir):
         """
         Args:
             path_to_vm (str): path to .vmx file
@@ -78,7 +81,11 @@ class DA_Agent_Env(gym.Env):
         
         self.controller = PythonController(container=self.container, work_dir=self.work_dir)
         self.setup_controller = SetupController(container=self.container, cache_dir=self.cache_dir)
-        
+        #新增
+        self.generated_tool_dir = generated_tool_dir
+        self.tool_retriever = ToolRetriever(self.generated_tool_dir)
+        self.tool_retrieval_tool = ToolRetrievalTool(self.generated_tool_dir)
+
         logger.info("Setting up environment...")
         
         dir = os.path.join(self.source_dir, self.task_id)
@@ -319,12 +326,16 @@ class DA_Agent_Env(gym.Env):
                     observation = self.execute_llm_search_action(action)
                 elif isinstance(action, CheckOutputWithLLM):
                     observation = self.execute_check_output_with_llm_action(action)
+                elif isinstance(action, AddNewToolAction):
+                    observation = self.execute_add_new_tool_action(action)
+                elif isinstance(action, QueryToolsAction):
+                    observation = self.execute_query_tools_action(action)
                 else:
                     raise ValueError(f"Unrecognized action type {action.action_type} !")
         except TimeoutError as e:
             observation = str(e)
         
-        observation = self._handle_observation(observation)
+        observation = self._handle_observation(observation) #设置最大长度
         # logger.info("Observation: %s", observation)
         return observation, done
     
@@ -382,6 +393,38 @@ class DA_Agent_Env(gym.Env):
             obs = f"Check output with LLM executed successfully. No output."
         
         return obs
+    
+    def execute_add_new_tool_action(self, action: AddNewToolAction):
+        try:
+            code = action.code
+            print(f"Executing AddNewToolAction with code:\n{code}")
+
+            observation = self.controller.execute_python_code(code)
+
+            # 解析生成的工具
+            generated_tools = parse_generated_tools(code)
+            print(f"Parsed generated tools: {generated_tools}")
+
+            for tool in generated_tools:
+                self.tool_retriever.add_new_tool(tool)
+                print(f"Added tool to tool_retrieval_tool: {tool.name}")
+
+            return observation
+        except Exception as e:
+            print(f"Error executing AddNewToolAction: {str(e)}")
+            return f"Failed to add new tool: {str(e)}"
+
+
+    def execute_query_tools_action(self, action: QueryToolsAction):
+        try:
+            print(f"Executing QueryToolsAction with query: {action.query}")
+            # 假设环境中有一个方法来处理工具查询
+            tools_description = self.tool_retrieval_tool.forward(action.query)
+            print(f"Retrieved tools description: {tools_description}")
+            return tools_description
+        except Exception as e:
+            print(f"Error executing QueryToolsAction: {str(e)}")
+            return f"Failed to query tools: {str(e)}"
     
     # def create_file_action(self, action: CreateFile):
     #     obs = self.controller.create_file(action.filepath, action.code)
