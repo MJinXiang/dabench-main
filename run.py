@@ -10,6 +10,8 @@ from tqdm import tqdm
 
 from da_agent.envs.da_agent import DA_Agent_Env
 from da_agent.agent.agents import PromptAgent
+# from da_agent.agent.COT_agent import COTAgent
+# from da_agent.agent.agent_manager import AgentManager
 # from da_agent.agent.workflow import workflow
 
 
@@ -74,6 +76,8 @@ def config() -> argparse.Namespace:
 
     # output related
     parser.add_argument("--output_dir", type=str, default="output")
+
+    parser.add_argument("--generated_action_dir", type=str, default="generated_actions")
     args = parser.parse_args()
 
     return args
@@ -102,6 +106,16 @@ def test(
             "work_dir": "/workspace",
         }
     }
+
+
+    # cotagent=COTAgent(
+    #     model=args.model,
+    #     max_tokens=args.max_tokens,
+    #     top_p=args.top_p,
+    #     temperature=args.temperature,
+    #     max_memory_length=args.max_memory_length,
+    #     max_steps=args.max_steps,
+    # )
     
     agent = PromptAgent(
         model=args.model,
@@ -110,6 +124,7 @@ def test(
         temperature=args.temperature,
         max_memory_length=args.max_memory_length,
         max_steps=args.max_steps,
+        generated_tool_dir=args.generated_action_dir
     )
     
     ## load task configs
@@ -166,6 +181,7 @@ def test(
             task_config=task_config,
             source_dir=args.source_dir,
             # workflow=workflow,
+            generated_tool_dir=args.generated_action_dir,
             cache_dir="./cache", #缓存目录
             mnt_dir=output_dir #输出目录
         )
