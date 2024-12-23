@@ -410,7 +410,7 @@ class DA_Agent_Env(gym.Env):
 
             observation = self.controller.execute_python_code(executable_code)
             if observation is None or observation == '':
-                observation = f"{action} executed successfully. No output."
+                observation = f"{action.name} executed successfully. No output."
             # print(f"Execution result:\n{observation}")
 
         
