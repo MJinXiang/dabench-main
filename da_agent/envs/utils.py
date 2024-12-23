@@ -12,8 +12,8 @@ import sys
 import threading
 
 
-
-TIMEOUT_DURATION = 25
+# TIMEOUT_DURATION = 25
+TIMEOUT_DURATION = 30
 
 def is_file_valid(file_path):
     ext = os.path.splitext(file_path)[1].lower()

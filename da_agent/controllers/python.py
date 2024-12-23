@@ -9,6 +9,7 @@ import ast
 import tempfile
 import platform
 import re
+from da_agent.agent.models import call_llm
 from da_agent.configs.sql_template import SQL_TEMPLATE
 # from da_agent.agent.action import ListFiles, Python
 logger = logging.getLogger("spider.pycontroller")
@@ -312,9 +313,83 @@ class PythonController:
         return formatted_result
 
 
+    def generate_executable_code(self, tools_description: str, tool_codes: dict) -> str:
+        """
+        根据工具描述和代码，调用 LLM 生成可执行的 Python 程序。
+        Args:
+            tools_description (str): 工具的描述。
+            tool_codes (dict): 工具的代码字典，键为工具名称，值为代码。
+        Returns:
+         str: LLM 生成的代码。
+        """
+        prompt = f"""
+            Based on the following tool descriptions and code, write a complete and executable Python program that calls these tools and demonstrates their functionality.
+            ### Tool Descriptions:
+            {tools_description}
+            ### Tool Code:
+            {tool_codes}
+            Please ensure that the generated code correctly calls these tools.
+        """
+
+        payload = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 1000,
+            "temperature": 0
+        }
+
+        # print("Sending prompt to LLM for code generation...")
+
+        # 调用 LLM 生成代码
+        success, llm_response = call_llm(payload)
+        if success:
+            # print(f"Generated response from LLM:\n{llm_response}")
+
+            # 提取代码块
+            extracted_code = self.extract_code_from_response(llm_response)
+            if extracted_code:
+                # print(f"Extracted executable code:\n{extracted_code}")
+                return extracted_code
+            else:
+                return "Failed to extract executable code from LLM response."
+        else:
+            return f"Failed to generate code: {llm_response}"
+      
+
+    def extract_code_from_response(self, llm_response: str) -> str:
+        """
+        从 LLM 的响应中提取 Python 代码块。
+
+        Args:
+            llm_response (str): LLM 生成的响应内容。
+
+        Returns:
+            str: 提取出的 Python 代码。如果未找到代码块，则返回空字符串。
+        """
+        # import re
+
+        # 正则表达式匹配 Python 代码块
+        code_pattern = re.compile(r'```python\s*\n(.*?)```', re.DOTALL)
+        match = code_pattern.search(llm_response)
+        if match:
+            return match.group(1).strip()
+        return ""
+    
+
+    def extract_executable_code(self, code: str) -> str:
+        """
+        去除外层三重引号等无关内容，返回可执行代码。
+        """
+        # 如果以三重引号开头结尾，则去掉
+        if code.startswith('"""') and code.endswith('"""'):
+            code = code[3:-3].strip()
+        return code
+
     def execute_llm_search(self, prompt: str):
         """ Execute the action to query another LLM """
-        from da_agent.agent.models import call_llm
+        # from da_agent.agent.models import call_llm
 
         # 构建调用参数
         payload = {
@@ -342,7 +417,7 @@ class PythonController:
         """
         Execute the action to check the output using another LLM
         """
-        from da_agent.agent.models import call_llm
+        # from da_agent.agent.models import call_llm
 
         # 构建调用参数
         prompt = f"""

@@ -21,6 +21,7 @@ from da_agent.agent.workflow import WorkflowNode, workflow_start_node
 from da_agent.agent.tool_retriever import ToolRetriever
 from da_agent.agent.tool_retriever import ToolRetrievalTool
 from da_agent.agent.generatedtool import parse_generated_tools
+from transformers.agents.default_tools import Tool
 
 logger = logging.getLogger("da_agent.env")
 
@@ -394,37 +395,80 @@ class DA_Agent_Env(gym.Env):
         
         return obs
     
+    
+    
     def execute_add_new_tool_action(self, action: AddNewToolAction):
         try:
             code = action.code
-            print(f"Executing AddNewToolAction with code:\n{code}")
+            executable_code = self.controller.extract_executable_code(code)
+            # print(f"Executing AddNewToolAction with code:\n{code}")
 
-            observation = self.controller.execute_python_code(code)
-
-            # 解析生成的工具
+             # 解析生成的工具
+            # print("Parsing generated tools...")
             generated_tools = parse_generated_tools(code)
-            print(f"Parsed generated tools: {generated_tools}")
+            # print(f"Parsed generated tools: {generated_tools}")
 
+            observation = self.controller.execute_python_code(executable_code)
+            if observation is None or observation == '':
+                observation = f"{action} executed successfully. No output."
+            # print(f"Execution result:\n{observation}")
+
+        
             for tool in generated_tools:
+                print(f"Adding tool: {tool.name}")
                 self.tool_retriever.add_new_tool(tool)
-                print(f"Added tool to tool_retrieval_tool: {tool.name}")
+                # print(f"Added tool to tool_retrieval_tool: {tool.name}")
 
             return observation
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Traceback:\n{error_trace}")
             print(f"Error executing AddNewToolAction: {str(e)}")
             return f"Failed to add new tool: {str(e)}"
 
 
     def execute_query_tools_action(self, action: QueryToolsAction):
         try:
-            print(f"Executing QueryToolsAction with query: {action.query}")
+            # print(f"Executing QueryToolsAction with query: {action.query}")
+
+            relevant_tools: List[Tool] = self.tool_retrieval_tool.tool_retriever.retrieve(action.query)
+            if not relevant_tools:
+                return "No tools found for the query."            
+                
             # 假设环境中有一个方法来处理工具查询
             tools_description = self.tool_retrieval_tool.forward(action.query)
             print(f"Retrieved tools description: {tools_description}")
-            return tools_description
+
+            # 获取工具代码
+            tool_codes = {}
+            for tool in relevant_tools:
+                code = self.tool_retrieval_tool.tool_retriever.get_tool_code(tool.name)
+                if code:
+                    tool_codes[tool.name] = code
+                else:
+                    tool_codes[tool.name] = "Code not found."
+
+
+            # 调用生成可执行代码的方法
+            generated_code = self.controller.generate_executable_code(tools_description, tool_codes)
+            print(f"Generated executable code:\n{generated_code}")
+
+            if generated_code.startswith("Failed"):
+                return generated_code
+
+            # 执行生成的代码并捕获输出
+            obs = self.controller.execute_python_code(generated_code)
+            # print(f"Execution result:\n{obs}")
+
+            return obs
+            # return tools_description
         except Exception as e:
             print(f"Error executing QueryToolsAction: {str(e)}")
             return f"Failed to query tools: {str(e)}"
+        
+    
+     
     
     # def create_file_action(self, action: CreateFile):
     #     obs = self.controller.create_file(action.filepath, action.code)

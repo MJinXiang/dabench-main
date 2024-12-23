@@ -27,7 +27,7 @@ The maximum number of steps you can take is {max_steps}.
    *Example*: `def ACTION_name(param: int) -> str:`
    - Include a one-line docstring describing the ACTION's purpose, following PEP 257 standards.
    - When your ACTION calls multiple other ACTION that are not from a third-party library, ensure you print the output after each call. This will help identify any ACTION that produces incorrect or unexpected results.
-
+5. Because the generated action is abstract, you need to supply the necessary actual parameters when running this action.
 
 # RESPONSE FROMAT # 
 For each task input, your response should contain:
@@ -76,7 +76,7 @@ The maximum number of steps you can take is {max_steps}.
    *Example*: `def ACTION_name(param: int) -> str:`
    - Include a one-line docstring describing the ACTION's purpose, following PEP 257 standards.
    - When your ACTION calls multiple other ACTION that are not from a third-party library, ensure you print the output after each call. This will help identify any ACTION that produces incorrect or unexpected results.
-
+5. Because the generated action is abstract, you need to supply the necessary actual parameters when running this action.
 
 # Reference Code #
 

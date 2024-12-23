@@ -26,8 +26,9 @@ class ToolRetriever:
      
         if EMBED_MODEL_TYPE == "OpenAI":
             embedding_function = OpenAIEmbeddings(
-                openai_api_key=OPENAI_API_KEY,
-                model="text-embedding-3-large"
+                api_key=OPENAI_API_KEY, #x修改后的
+                model="text-embedding-3-large",
+                base_url="https://api2.aigcbest.top/v1",
             )
             embed_model_name = EMBED_MODEL_NAME
 
@@ -45,9 +46,10 @@ class ToolRetriever:
             for tool in tools:
                 self.generated_tools[tool.name] = tool
 
-    def retrieve(self, query: str, k: int = 10) -> List[Tool]:
+    def retrieve(self, query: str, k: int = 1) -> List[Tool]:
         k = min(len(self.vectordb), k)
         if k == 0:
+            print("No tools in the database.")
             return []
         docs_and_scores = self.vectordb.similarity_search_with_score(query, k=k)
         tools = []
@@ -59,13 +61,18 @@ class ToolRetriever:
     def add_new_tool(self, tool: Tool):
         program_name = tool.name
         program_description = tool.description
+        # program_code = tool.code
+        program_inputs = tool.inputs
+        program_output_type = tool.output_type
+        # program_dependencies = tool.dependencies
 
         res = self.vectordb._collection.get(ids=[program_name])
         # 检查工具是否已存在
         if res["ids"]:
-            raise ValueError(f"Tool {program_name} already exists!")
+            # raise ValueError(f"Tool {program_name} already exists!")
+            print(f"Tool {program_name} already exists, deleting the old one...")
             # 如果需要覆盖，可以删除并重新添加
-            # self.vectordb._collection.delete(ids=[program_name])
+            self.vectordb._collection.delete(ids=[program_name])
 
         # 添加新工具到向量数据库和工具字典
         self.vectordb.add_texts(
@@ -75,7 +82,7 @@ class ToolRetriever:
         )
         self.generated_tools[tool.name] = tool
 
-        self.vectordb.persist()
+        # self.vectordb.persist()
 
     def add_new_tool_from_path(self, path: str):
         with open(path, "r", encoding="utf-8") as f:
@@ -83,6 +90,32 @@ class ToolRetriever:
         tools = parse_generated_tools(code)
         for tool in tools:
             self.add_new_tool(tool)
+
+
+    def get_tool_code(self, tool_name: str):
+        """
+        根据工具名称检索其代码。
+        
+        Args:
+            tool_name (str): 工具的名称。
+        
+        Returns:
+            Optional[str]: 工具的代码，如果未找到则返回 None。
+        """
+        # 假设生成的工具存储在 generated_tool_dir 目录下，文件名格式为 "{id}_{tool_name}.py"
+        pattern = os.path.join(self.generated_tool_dir, f"*_{tool_name}.py")
+        matched_files = glob(pattern)
+        if not matched_files:
+            print(f"Tool code file for '{tool_name}' not found.")
+            return None
+        file_path = matched_files[0]  # 假设每个工具只有一个代码文件
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            return code
+        except Exception as e:
+            print(f"Error reading tool code for '{tool_name}': {str(e)}")
+            return None
 
 
 class ToolRetrievalTool(Tool):
@@ -101,9 +134,18 @@ class ToolRetrievalTool(Tool):
         relevant_tools: List[Tool] = self.tool_retriever.retrieve(query)
         if relevant_tools:
             relevant_toolbox = Toolbox(relevant_tools)
-            return relevant_toolbox.show_tool_descriptions(
+            descriptions = relevant_toolbox.show_tool_descriptions(
                 self.tool_description_template
             )
+            # 确保占位符被替换
+            if "<<tool_name>>" in descriptions or "<<tool_description>>" in descriptions:
+                descriptions = "\n".join(
+                    f"{tool.name}: {tool.description}" for tool in relevant_tools
+                )
+            return descriptions
+            # return relevant_toolbox.show_tool_descriptions(
+            #     self.tool_description_template
+            # )
         else:
             return "No tool found"
 

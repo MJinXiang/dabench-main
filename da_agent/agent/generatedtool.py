@@ -2,6 +2,7 @@ import ast
 import os
 from glob import glob
 from typing import Union
+import re
 
 from transformers.agents import Tool
 
@@ -62,7 +63,26 @@ def add_parent_pointers(node) -> None:
 
 def parse_generated_tools(code: str) -> list[GeneratedTool]:
     """Parse LLM-generated code. Save new functions if any."""
-    tree = ast.parse(code)
+    # 清理多余的三引号
+    # if code.startswith('"""') and code.endswith('"""'):
+    #     code = code[3:-3].strip()
+
+    # # 清理和验证代码字符串
+    # code = code.strip()
+    # if not code.endswith("\n"):
+    #     code += "\n"
+    # code = code.replace("\\n", "\n")  # 修复换行符问题
+
+    # code = re.sub(r"\\'", "'", code) # 修复转义的单引号
+
+    try:
+        # 解析代码
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        print(f"SyntaxError while parsing code: {code}")
+        raise e
+
+    # tree = ast.parse(code)
 
     # Do this so later we can extract only the top-level imports and functions
     add_parent_pointers(tree)
@@ -73,11 +93,17 @@ def parse_generated_tools(code: str) -> list[GeneratedTool]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import) and isinstance(node.parent, ast.Module):
             for alias in node.names:
-                import_statements.append(f"import {alias.name}")
+                if alias.asname:
+                    import_statements.append(f"import {alias.name} as {alias.asname}")
+                else:
+                    import_statements.append(f"import {alias.name}")
         elif isinstance(node, ast.ImportFrom) and isinstance(node.parent, ast.Module):
             module = node.module if node.module else ""
             for alias in node.names:
-                import_statements.append(f"from {module} import {alias.name}")
+                if alias.asname:
+                    import_statements.append(f"from {module} import {alias.name} as {alias.asname}")
+                else:
+                    import_statements.append(f"from {module} import {alias.name}")
         # In case there is func def inside a func, we only extract the top-level ones
         elif isinstance(node, ast.FunctionDef) and isinstance(node.parent, ast.Module):
             func_defs.append(node)

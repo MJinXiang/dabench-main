@@ -25,6 +25,7 @@ from da_agent.agent.generatedtool import GeneratedTool, add_parent_pointers, par
 from da_agent.agent.tool_retriever import ToolRetrievalTool
 
 
+
 MAX_OBSERVATION_LENGTH = 2000
 TIME_OUT_ACTION = 600
 
@@ -61,6 +62,7 @@ class PromptAgent:
         self.generated_toolbox = self.load_generated_tools()
         # 用于追踪函数调用次数（可选）
         self.prev_num_calls = {}
+   
         # 初始化 ToolRetrievalTool
         self.tool_retrieval_tool = ToolRetrievalTool(self.generated_tool_dir)
         # 将 ToolRetrievalTool 添加到工具箱
@@ -88,6 +90,10 @@ class PromptAgent:
         self.codes = []
         self.history_messages = []
         self.instruction = self.env.task_config['instruction']
+
+        # 加载生成的工具
+        self.generated_toolbox = self.load_generated_tools()
+        
         # self.workflow = self.env.workflow
         # 设置起始节点
         self.workflow_start_node = self.env.workflow_start_node
@@ -277,7 +283,7 @@ class PromptAgent:
             tools = parse_generated_tools(code)
             generated_tools.extend(tools)
             # 将生成的工具加载到环境中
-            self.env.step(code)
+            # self.env.step(code)
         return Toolbox(generated_tools)
    
 
@@ -295,10 +301,15 @@ class PromptAgent:
         return shell_cmds, code_action
     
     def save_generated_tools(self, code_action: str):
-        _, code_action = self.remove_shell_commands(code_action)
+        # _, code_action = self.remove_shell_commands(code_action)
+        # print(f"Saving generated tool:\n{code_action}")
         generated_tools = parse_generated_tools(code_action)
 
         for tool in generated_tools:
+            if tool.name in self.generated_toolbox.tools:
+                print(f"Tool '{tool.name}' already exists. Removing it before adding the new one.")
+                self.generated_toolbox.remove_tool(tool.name)
+
             self.generated_toolbox.add_tool(tool)
 
             tool_id = len(self.generated_toolbox.tools)
@@ -312,7 +323,61 @@ class PromptAgent:
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
- 
+    def prerun(self, code_action: str) -> str:
+        shell_cmds, code_action = self.remove_shell_commands(code_action)
+        code_action = self.correct_docstring(code_action)
+        self.check_collision(code_action)
+        code_action = self.add_decorators(code_action)
+
+        # Add the shell_commands back
+        code_action = shell_cmds + "\n" + code_action
+        return code_action
+
+    def correct_docstring(self, code_action: str) -> str:
+        try:
+            tree = ast.parse(code_action)
+        except Exception as e:
+            print(f"Attempt to correct docstring failed due to the following error: {e}")
+            return code_action
+
+        add_parent_pointers(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and isinstance(node.parent, ast.Module):
+                if ast.get_docstring(node) is None:
+                    func = ast.unparse(node)
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": f"Write a one-line docstring for the following Python function:\n```\n{func}\n```",
+                        }
+                    ]
+                    # resp = call_llm(messages) #调了api，写文档字符串，用来描述当前action的作用
+                    success, resp = call_llm({
+                                        "model": self.model,
+                                        "messages": messages,
+                                        "max_tokens": self.max_tokens,
+                                        "top_p": self.top_p,
+                                        "temperature": self.temperature
+                                    })
+                    if success:
+                        try:
+                            docstring = re.findall(r'"""(.*?)"""', resp, re.DOTALL)[0]
+                            node.body.insert(0, ast.Expr(value=ast.Constant(value=docstring))) #将提取到的文档字符串插入到函数定义的AST节点 node 的主体部分的第一个位置，形成标准的文档字符串。
+                        except Exception as e:
+                            print(f"Attempt to correct docstring failed due to the following error: {e}")
+                            return code_action
+                    else:
+                        print(f"LLM call failed. Unable to generate docstring for the function: {node.name}")
+                        return code_action
+
+        try:
+            corrected_code_action = ast.unparse(tree)
+            return corrected_code_action
+        except Exception as e:
+            print(f"Attempt to correct docstring failed due to the following error: {e}")
+            return code_action
+
+
 
     def run(self):
         assert self.env is not None, "Environment is not set."

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Union, List, Dict
 from abc import ABC
 import os
+import ast
 
 def remove_quote(text: str) -> str:
     """ 
@@ -391,6 +392,41 @@ class CheckOutputWithLLM(Action):
         return f'{self.__class__.__name__}(output="{self.output}", target="{self.target}")'
 
 
+# @dataclass
+# class AddNewToolAction(Action):
+#     action_type: str = field(
+#         default="add_new_tool",
+#         init=False,
+#         repr=False,
+#         metadata={"help": "Action to add a new tool"}
+#     )
+
+#     code: str = field(
+#         metadata={"help": "Python code of the new tool"}
+#     )
+
+#     @classmethod
+#     def get_action_description(cls) -> str:
+#         return """
+# ### AddNewToolAction
+# Signature: `AddNewToolAction(code="def new_tool(...): ...")`
+# Description: Adds and executes a new tool defined by the provided Python code. Then proceed to execute the tools with the provided parameters.
+# Example: AddNewToolAction(code="def new_tool(input): return input * 2  results=new_tool(2)  print(results)")
+# """
+
+#     @classmethod
+#     def get_this_action(cls) -> str:
+#         return """Action: AddNewToolAction(code="def new_tool(input): return input * 2  \\n results=new_tool(2) \\n print(results)")"""
+
+#     @classmethod
+#     def parse_action_from_text(cls, text: str) -> Optional[Action]:
+#         import re
+#         match = re.match(r'AddNewToolAction\(\s*code\s*=\s*(\".*?\"|\'.*?\')\s*\)', text.strip(), re.DOTALL)
+#         if match:
+#             code = remove_quote(match.group(1))
+#             return cls(code=code)
+#         return None
+    
 @dataclass
 class AddNewToolAction(Action):
     action_type: str = field(
@@ -400,6 +436,10 @@ class AddNewToolAction(Action):
         metadata={"help": "Action to add a new tool"}
     )
 
+    name: str = field(
+        metadata={"help": "Name of the new tool function"}
+    )
+
     code: str = field(
         metadata={"help": "Python code of the new tool"}
     )
@@ -407,24 +447,43 @@ class AddNewToolAction(Action):
     @classmethod
     def get_action_description(cls) -> str:
         return """
-### AddNewToolAction
-Signature: `AddNewToolAction(code="def new_tool(...): ...")`
-Description: Adds and executes a new tool defined by the provided Python code.
-Example: AddNewToolAction(code="def new_tool(input): return input * 2")
+## AddNewToolAction
+* Signature: AddNewToolAction(name="new_tool"):
+```python
+executable_python_code
+```
+* Description: This action will create and execute a Python function named `name` with the content wrapped by paired ``` symbols. The function will be defined and executed in the same action.
+* Example: AddNewToolAction(name="new_tool"):
+```python
+def new_tool(input):
+    return input * 2
+
+results = new_tool(2)
+print(results)
+```
 """
 
     @classmethod
     def get_this_action(cls) -> str:
-        return """Action: AddNewToolAction(code="def new_tool(input): return input * 2")"""
+        return """Action: AddNewToolAction(name="new_tool")"""
 
+    
     @classmethod
     def parse_action_from_text(cls, text: str) -> Optional[Action]:
-        import re
-        match = re.match(r'AddNewToolAction\(\s*code\s*=\s*(\".*?\"|\'.*?\')\s*\)', text.strip(), re.DOTALL)
-        if match:
-            code = remove_quote(match.group(1))
-            return cls(code=code)
+        pattern=[r'AddNewToolAction\(name=(.*?)\).*?```python[ \t]*(\w+)?[ \t]*\r?\n(.*)[\r\n \t]*```',r'AddNewToolAction\(name=(.*?)\).*?```[ \t]*(\w+)?[ \t]*\r?\n(.*)[\r\n \t]*```',
+                 r'AddNewToolAction\(name=(.*?)\).*?```python[ \t]*(\w+)?[ \t]*\r?\n(.*)[\r\n \t]*```',r'AddNewToolAction\(name=(.*?)\).*?```[ \t]*(\w+)?[ \t]*\r?\n(.*)[\r\n \t]*```']
+        for p in pattern:
+            matches = re.findall(p, text, flags=re.DOTALL)
+            if matches:
+                name = matches[-1][0].strip()
+                code = matches[-1][2].strip()
+                return cls(code=code, name=remove_quote(name))
         return None
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}(name="{self.name}"):\n```python\n{self.code}\n```'
+
+
 
 
 @dataclass
@@ -440,12 +499,18 @@ class QueryToolsAction(Action):
         metadata={"help": "Query to retrieve relevant tools"}
     )
 
+    code: str = field(
+        default="",
+        init=False,
+        metadata={"help": "Find realated action"}
+    )
+
     @classmethod
     def get_action_description(cls) -> str:
         return """
 ### QueryToolsAction
 Signature: `QueryToolsAction(query="your query here")`
-Description: Retrieves relevant tools based on the provided query.
+Description: Retrieves relevant tools based on the provided query, Then run the tools using the specified parameters.
 Example: QueryToolsAction(query="data analysis tools")
 """
 
